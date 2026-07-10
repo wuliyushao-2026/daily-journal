@@ -538,6 +538,69 @@
     border-color: var(--accent);
     color: var(--accent);
   }
+  .btn-img.recording {
+    border-color: var(--danger);
+    color: var(--danger);
+    background: rgba(217,116,106,0.08);
+    animation: pulse-rec 1.5s ease infinite;
+  }
+  @keyframes pulse-rec {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+  }
+  .voice-status {
+    font-size: 13px;
+    color: var(--danger);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-weight: 500;
+  }
+  .voice-status .rec-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--danger);
+    animation: pulse-rec 1s ease infinite;
+  }
+  .audio-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: var(--bg);
+    border-radius: var(--radius-sm);
+    padding: 10px 14px;
+    margin-top: 8px;
+  }
+  .audio-item audio {
+    flex: 1;
+    height: 36px;
+  }
+  .audio-item .audio-del {
+    width: 28px;
+    height: 28px;
+    border: none;
+    border-radius: 50%;
+    background: rgba(0,0,0,0.05);
+    color: var(--muted);
+    cursor: pointer;
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  .audio-item .audio-del:hover {
+    background: rgba(217,116,106,0.15);
+    color: var(--danger);
+  }
+  .audio-empty {
+    margin-top: 8px;
+    font-size: 13px;
+    color: var(--muted);
+    text-align: center;
+    padding: 8px;
+  }
 
   .journal-actions {
     display: flex;
@@ -661,6 +724,43 @@
     background: var(--bg);
     border-radius: var(--radius-sm);
     margin-bottom: 16px;
+  }
+
+  /* ---- Reminder Popup ---- */
+  .reminder-popup {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.5);
+    z-index: 220;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    animation: fadeIn 0.3s ease;
+  }
+  .reminder-popup-card {
+    background: var(--bg2);
+    border-radius: 16px;
+    padding: 32px 28px;
+    text-align: center;
+    max-width: 340px;
+    width: 90%;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.15);
+    animation: bounceIn 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+  .reminder-popup-icon {
+    font-size: 48px;
+    margin-bottom: 12px;
+  }
+  .reminder-popup-title {
+    font-size: 18px;
+    font-weight: 700;
+    margin-bottom: 6px;
+    color: var(--ink);
+  }
+  .reminder-popup-time {
+    font-size: 14px;
+    color: var(--muted);
+    margin-bottom: 20px;
   }
 
   /* ---- Celebration Modal ---- */
@@ -1111,6 +1211,7 @@
     <button class="btn-sm" id="syncBtn"><span class="sync-dot" id="syncDot"></span> 云同步</button>
     <button class="btn-sm" id="calendarBtn">&#x1F4C5; 日历</button>
     <button class="btn-sm" id="summaryBtn">&#x1F4CA; 汇总</button>
+    <button class="btn-sm" id="soundToggleBtn" title="提醒声音">&#x1F514; 声音开</button>
     <button class="btn-sm" id="copyBackupBtn">&#x1F4CB; 复制备份</button>
     <button class="btn-sm" id="exportBtn">&#x1F4E5; 导出文件</button>
     <button class="btn-sm" id="importBtn">&#x1F4E4; 导入文件</button>
@@ -1154,6 +1255,8 @@
       <textarea id="journalContent" placeholder="写下今天的心情和收获..."></textarea>
       <div class="journal-image-actions">
         <button class="btn-img" id="addImageBtn">&#x1F4F7; 添加图片</button>
+        <button class="btn-img" id="voiceBtn">&#x1F3A4; 录音</button>
+        <span class="voice-status" id="voiceStatus" style="display:none;"></span>
         <input type="file" id="imageInput" accept="image/*" multiple style="display:none;">
       </div>
       <div class="journal-gallery" id="journalGallery"></div>
@@ -1241,6 +1344,16 @@
   </div>
 </div>
 
+<!-- Reminder Popup -->
+<div class="reminder-popup" id="reminderPopup" style="display:none;">
+  <div class="reminder-popup-card">
+    <div class="reminder-popup-icon">&#x1F514;</div>
+    <div class="reminder-popup-title" id="reminderPopupTitle"></div>
+    <div class="reminder-popup-time" id="reminderPopupTime"></div>
+    <button class="btn btn-primary" id="reminderPopupClose">知道了</button>
+  </div>
+</div>
+
 <!-- Celebration -->
 <div class="celebration-overlay" id="celebrationOverlay" style="display:none;">
   <div class="celebration-card">
@@ -1259,8 +1372,9 @@
   var STORAGE_KEY = 'daily_journal_schedules';
   var SYNC_CONFIG_KEY = 'daily_journal_sync_config';
   var DB_NAME = 'daily_journal_db';
-  var DB_VERSION = 1;
+  var DB_VERSION = 2;
   var IMAGE_STORE = 'journal_images';
+  var VOICE_STORE = 'journal_voices';
   var currentDate = new Date().toISOString().slice(0, 10);
   var currentJournalId = null;
   var reminderInterval = null;
@@ -1268,6 +1382,10 @@
   var syncTimer = null;
   var gistId = null;
   var isSyncing = false;
+  var voiceRecorder = null;
+  var voiceChunks = [];
+  var isRecording = false;
+  var soundEnabled = true;
 
   // ---- Encouragement Messages ----
   var encouragements = [
@@ -1330,6 +1448,9 @@
         var d = e.target.result;
         if (!d.objectStoreNames.contains(IMAGE_STORE)) {
           d.createObjectStore(IMAGE_STORE);
+        }
+        if (!d.objectStoreNames.contains(VOICE_STORE)) {
+          d.createObjectStore(VOICE_STORE);
         }
       };
       req.onsuccess = function(e) {
@@ -1396,6 +1517,36 @@
       var tx = db.transaction(IMAGE_STORE, 'readwrite');
       var store = tx.objectStore(IMAGE_STORE);
       store.clear();
+      tx.oncomplete = function() { resolve(); };
+      tx.onerror = function(e) { reject(e.target.error); };
+    });
+  }
+
+  function saveVoices(id, voices) {
+    return new Promise(function(resolve, reject) {
+      var tx = db.transaction(VOICE_STORE, 'readwrite');
+      var store = tx.objectStore(VOICE_STORE);
+      store.put(voices, id);
+      tx.oncomplete = function() { resolve(); };
+      tx.onerror = function(e) { reject(e.target.error); };
+    });
+  }
+
+  function loadVoices(id) {
+    return new Promise(function(resolve, reject) {
+      var tx = db.transaction(VOICE_STORE, 'readonly');
+      var store = tx.objectStore(VOICE_STORE);
+      var req = store.get(id);
+      req.onsuccess = function() { resolve(req.result || []); };
+      req.onerror = function(e) { reject(e.target.error); };
+    });
+  }
+
+  function deleteVoices(id) {
+    return new Promise(function(resolve, reject) {
+      var tx = db.transaction(VOICE_STORE, 'readwrite');
+      var store = tx.objectStore(VOICE_STORE);
+      store.delete(id);
       tx.oncomplete = function() { resolve(); };
       tx.onerror = function(e) { reject(e.target.error); };
     });
@@ -1787,6 +1938,8 @@
   var celebrationOverlay = $('celebrationOverlay');
   var confettiContainer = $('confettiContainer');
   var syncModal = $('syncModal');
+  var calendarOverlay = $('calendarOverlay');
+  var summaryOverlay = $('summaryOverlay');
 
   // ---- Toast ----
   function showToast(msg) {
@@ -1869,12 +2022,23 @@
     renderCalendar();
   }
 
+  function buildScheduleData() {
+    var data = {};
+    var schedules = loadAll();
+    for (var i = 0; i < schedules.length; i++) {
+      var s = schedules[i];
+      if (!data[s.date]) data[s.date] = [];
+      data[s.date].push(s);
+    }
+    return data;
+  }
+
   function getDatesWithData() {
     var dates = {};
-    var keys = Object.keys(scheduleData);
+    var data = buildScheduleData();
+    var keys = Object.keys(data);
     for (var i = 0; i < keys.length; i++) {
-      var items = scheduleData[keys[i]];
-      if (items && items.length > 0) {
+      if (data[keys[i]] && data[keys[i]].length > 0) {
         dates[keys[i]] = true;
       }
     }
@@ -1925,7 +2089,7 @@
       dayBtns[i].addEventListener('click', function() {
         currentDate = this.dataset.date;
         closeCalendar();
-        renderAll();
+        renderMain(currentDate);
       });
     }
   }
@@ -1990,8 +2154,9 @@
     var activeDays = 0;
     var dailyData = [];
 
+    var data = buildScheduleData();
     for (var i = 0; i < dates.length; i++) {
-      var items = scheduleData[dates[i]] || [];
+      var items = data[dates[i]] || [];
       if (items.length > 0) {
         activeDays++;
         totalTasks += items.length;
@@ -2128,12 +2293,45 @@
       rows[i].addEventListener('click', function() {
         currentDate = this.dataset.date;
         closeSummary();
-        renderAll();
+        renderMain(currentDate);
       });
     }
   }
 
   // ---- Reminder ----
+  function playReminderSound() {
+    if (!soundEnabled) return;
+    try {
+      var ctx = new (window.AudioContext || window.webkitAudioContext)();
+      var notes = [523.25, 659.25, 783.99]; // C5, E5, G5
+      notes.forEach(function(freq, i) {
+        var osc = ctx.createOscillator();
+        var gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.value = freq;
+        gain.gain.setValueAtTime(0.3, ctx.currentTime + i * 0.15);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + i * 0.15 + 0.4);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(ctx.currentTime + i * 0.15);
+        osc.stop(ctx.currentTime + i * 0.15 + 0.4);
+      });
+    } catch (e) {
+      // Web Audio not supported
+    }
+  }
+
+  function showReminderPopup(title, time) {
+    $('reminderPopupTitle').textContent = title;
+    $('reminderPopupTime').textContent = time + ' —— 该打卡啦！';
+    $('reminderPopup').style.display = 'flex';
+    playReminderSound();
+  }
+
+  function hideReminderPopup() {
+    $('reminderPopup').style.display = 'none';
+  }
+
   function requestNotificationPermission() {
     if ('Notification' in window && Notification.permission === 'default') {
       Notification.requestPermission();
@@ -2141,20 +2339,27 @@
   }
 
   function checkReminders() {
-    if (!('Notification' in window) || Notification.permission !== 'granted') return;
     var now = new Date();
     var timeStr = String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
     var todayStr = fmtDate(now);
 
     var schedules = loadAll();
+    var hasReminder = false;
     schedules.forEach(function(s) {
       if (s.date === todayStr && s.time === timeStr && !s.completed && !s._notified) {
-        new Notification('日程提醒', {
-          body: s.title + ' —— 该打卡啦！',
-          icon: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">&#x1F4C5;</text></svg>',
-          tag: s.id,
-          requireInteraction: true
-        });
+        hasReminder = true;
+        // Browser notification
+        if ('Notification' in window && Notification.permission === 'granted') {
+          new Notification('日程提醒: ' + s.title, {
+            body: s.time + ' —— 该打卡啦！',
+            icon: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">&#x1F4C5;</text></svg>',
+            tag: s.id,
+            requireInteraction: true,
+            vibrate: [200, 100, 200, 100, 200]
+          });
+        }
+        // In-page popup
+        showReminderPopup(s.title, s.time);
         s._notified = true;
         saveAll(schedules);
       }
@@ -2281,6 +2486,13 @@
     } catch (e) {
       renderJournalImages([]);
     }
+
+    try {
+      var voices = await loadVoices(id);
+      renderJournalVoices(voices);
+    } catch (e) {
+      renderJournalVoices([]);
+    }
   }
 
   function renderJournalImages(images) {
@@ -2341,7 +2553,119 @@
     reader.readAsDataURL(file);
   }
 
+  function renderJournalVoices(voices) {
+    var existing = journalGallery.querySelectorAll('.audio-item');
+    for (var i = 0; i < existing.length; i++) { existing[i].remove(); }
+    if (!voices || voices.length === 0) {
+      var emptyEl = journalGallery.querySelector('.audio-empty');
+      if (!emptyEl) {
+        emptyEl = document.createElement('div');
+        emptyEl.className = 'audio-empty';
+        emptyEl.textContent = '暂无语音记录';
+        journalGallery.appendChild(emptyEl);
+      }
+      return;
+    }
+    var emptyEl = journalGallery.querySelector('.audio-empty');
+    if (emptyEl) emptyEl.remove();
+    voices.forEach(function(voice, idx) {
+      var item = document.createElement('div');
+      item.className = 'audio-item';
+      item.innerHTML =
+        '<audio controls src="' + voice + '"></audio>' +
+        '<button class="audio-del" data-idx="' + idx + '">&#x2715;</button>';
+      item.querySelector('.audio-del').addEventListener('click', function(e) {
+        e.stopPropagation();
+        removeJournalVoice(idx);
+      });
+      journalGallery.appendChild(item);
+    });
+  }
+
+  async function removeJournalVoice(idx) {
+    if (!currentJournalId) return;
+    try {
+      var voices = await loadVoices(currentJournalId);
+      voices.splice(idx, 1);
+      if (voices.length === 0) {
+        await deleteVoices(currentJournalId);
+      } else {
+        await saveVoices(currentJournalId, voices);
+      }
+      renderJournalVoices(voices);
+      showToast('语音已删除');
+    } catch (e) {
+      console.error('Failed to remove voice:', e);
+    }
+  }
+
+  async function startVoiceRecording() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      showToast('当前浏览器不支持录音');
+      return;
+    }
+    try {
+      var stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      voiceRecorder = new MediaRecorder(stream, { mimeType: MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/mp4' });
+      voiceChunks = [];
+      voiceRecorder.ondataavailable = function(e) {
+        if (e.data.size > 0) voiceChunks.push(e.data);
+      };
+      voiceRecorder.onstop = async function() {
+        stream.getTracks().forEach(function(t) { t.stop(); });
+        var blob = new Blob(voiceChunks, { type: voiceRecorder.mimeType });
+        var reader = new FileReader();
+        reader.onload = async function(e) {
+          try {
+            var voices = await loadVoices(currentJournalId);
+            voices.push(e.target.result);
+            await saveVoices(currentJournalId, voices);
+            renderJournalVoices(voices);
+            showToast('语音已保存');
+          } catch (err) {
+            showToast('语音保存失败');
+          }
+        };
+        reader.readAsDataURL(blob);
+        voiceRecorder = null;
+        voiceChunks = [];
+        isRecording = false;
+        $('voiceBtn').classList.remove('recording');
+        $('voiceBtn').innerHTML = '&#x1F3A4; 录音';
+        $('voiceStatus').style.display = 'none';
+      };
+      voiceRecorder.start();
+      isRecording = true;
+      $('voiceBtn').classList.add('recording');
+      $('voiceBtn').innerHTML = '&#x23F9; 停止';
+      $('voiceStatus').style.display = 'flex';
+      $('voiceStatus').innerHTML = '<span class="rec-dot"></span> 录音中...';
+      showToast('开始录音');
+    } catch (e) {
+      showToast('无法访问麦克风: ' + (e.message || ''));
+    }
+  }
+
+  function stopVoiceRecording() {
+    if (voiceRecorder && voiceRecorder.state === 'recording') {
+      voiceRecorder.stop();
+    }
+  }
+
+  async function toggleVoiceRecording() {
+    if (!currentJournalId) {
+      showToast('请先打开手账');
+      return;
+    }
+    if (isRecording) {
+      stopVoiceRecording();
+    } else {
+      await startVoiceRecording();
+    }
+  }
+
   function closeJournal() {
+    if (isRecording) stopVoiceRecording();
     journalOverlay.style.display = 'none';
     currentJournalId = null;
     renderMain(currentDate);
@@ -2523,6 +2847,7 @@
       e.target.value = '';
     }
   });
+  $('voiceBtn').addEventListener('click', toggleVoiceRecording);
 
   // Sync modal events
   $('syncBtn').addEventListener('click', openSyncModal);
@@ -2550,6 +2875,25 @@
   $('calToday').addEventListener('click', calGoToday);
   calendarOverlay.addEventListener('click', function(e) {
     if (e.target === calendarOverlay) closeCalendar();
+  });
+
+  // Sound toggle
+  $('soundToggleBtn').addEventListener('click', function() {
+    soundEnabled = !soundEnabled;
+    if (soundEnabled) {
+      $('soundToggleBtn').innerHTML = '&#x1F514; 声音开';
+      $('soundToggleBtn').title = '提醒声音';
+    } else {
+      $('soundToggleBtn').innerHTML = '&#x1F515; 声音关';
+      $('soundToggleBtn').title = '提醒声音';
+    }
+    showToast(soundEnabled ? '提醒声音已开启' : '提醒声音已关闭');
+  });
+
+  // Reminder popup
+  $('reminderPopupClose').addEventListener('click', hideReminderPopup);
+  $('reminderPopup').addEventListener('click', function(e) {
+    if (e.target === $('reminderPopup')) hideReminderPopup();
   });
 
   // Summary events
